@@ -57,7 +57,7 @@ while true; do
             else
                 # Timeout (5), Manual Lock (1), or Window Closed
                 echo "[$(date +%H:%M)] Locking session."
-                loginctl lock-session
+                dm-tool lock
                 TIMER=$WORK_TIME
             fi
             ZENITY_PID=""
@@ -65,7 +65,7 @@ while true; do
             # Failsafe: Timer hit zero but popup is still hanging
             echo "[$(date +%H:%M)] Time expired. Automatic lock."
             kill $ZENITY_PID 2>/dev/null
-            loginctl lock-session
+            dm-tool lock
             TIMER=$WORK_TIME
             ZENITY_PID=""
         fi
