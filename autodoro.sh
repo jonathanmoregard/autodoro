@@ -63,7 +63,7 @@ while true; do
             ZENITY_PID=""
         elif [ $TIMER -le 0 ]; then
             # Failsafe: Timer hit zero but popup is still hanging
-            echo "[$(date +%H:%M)] Time expired. Forced lock."
+            echo "[$(date +%H:%M)] Time expired. Automatic lock."
             kill $ZENITY_PID 2>/dev/null
             loginctl lock-session
             TIMER=$WORK_TIME
