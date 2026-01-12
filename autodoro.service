@@ -1,12 +1,12 @@
 [Unit]
-Description=Force Pomodoro Timer
+Description=Autodoro Timer
 After=graphical-session.target
 
 [Service]
 Type=simple
 Environment="DISPLAY=:0"
 Environment="XAUTHORITY=%h/.Xauthority"
-ExecStart=%h/Repos/force-pomodoro/force-pomodoro.sh
+ExecStart=%h/Repos/autodoro/autodoro.sh
 Restart=always
 RestartSec=10
 StandardOutput=journal

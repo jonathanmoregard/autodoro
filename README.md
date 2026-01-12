@@ -1,4 +1,4 @@
-# Force Pomodoro
+# Autodoro
 
 A systemd user service that enforces automatic computer locking after a set work period, with intelligent meeting detection to pause the timer when your microphone is active.
 
@@ -22,39 +22,39 @@ A systemd user service that enforces automatic computer locking after a set work
 
 1. Clone or download this repository:
    ```bash
-   git clone <repository-url>
-   cd force-pomodoro
+   git clone https://github.com/jonathanmoregard/autodoro.git
+   cd autodoro
    ```
 
 2. Make the script executable:
    ```bash
-   chmod +x force-pomodoro.sh
+   chmod +x autodoro.sh
    ```
 
 3. Copy the systemd service file to your user config:
    ```bash
    mkdir -p ~/.config/systemd/user
-   cp force-pomodoro.service ~/.config/systemd/user/
+   cp autodoro.service ~/.config/systemd/user/
    ```
 
 4. Update the script path in the service file if needed:
    ```bash
-   nano ~/.config/systemd/user/force-pomodoro.service
+   nano ~/.config/systemd/user/autodoro.service
    ```
-   Update the `ExecStart` line to point to the full path of your `force-pomodoro.sh` script. The default assumes `~/Repos/force-pomodoro/force-pomodoro.sh`.
+   Update the `ExecStart` line to point to the full path of your `autodoro.sh` script. The default assumes `~/Repos/autodoro/autodoro.sh`.
 
 5. Reload systemd and enable the service:
    ```bash
    systemctl --user daemon-reload
-   systemctl --user enable force-pomodoro.service
-   systemctl --user start force-pomodoro.service
+   systemctl --user enable autodoro.service
+   systemctl --user start autodoro.service
    ```
 
 The service will now start automatically on login.
 
 ## Configuration
 
-Edit `force-pomodoro.sh` to customize:
+Edit `autodoro.sh` to customize:
 
 - `WORK_TIME`: Initial timer duration in seconds (default: 1500 = 25 minutes)
 - `POST_MEETING_TIME`: Grace period after meetings in seconds (default: 900 = 15 minutes)
@@ -75,11 +75,11 @@ Once enabled, the service runs automatically in the background. You don't need t
 
 ### Manual Control
 
-- **Check status**: `systemctl --user status force-pomodoro.service`
-- **View logs**: `journalctl --user -u force-pomodoro.service -f`
-- **Restart service**: `systemctl --user restart force-pomodoro.service`
-- **Stop service**: `systemctl --user stop force-pomodoro.service`
-- **Disable auto-start**: `systemctl --user disable force-pomodoro.service`
+- **Check status**: `systemctl --user status autodoro.service`
+- **View logs**: `journalctl --user -u autodoro.service -f`
+- **Restart service**: `systemctl --user restart autodoro.service`
+- **Stop service**: `systemctl --user stop autodoro.service`
+- **Disable auto-start**: `systemctl --user disable autodoro.service`
 
 ## How It Works
 
@@ -95,7 +95,7 @@ The script continuously monitors:
 
 - Check that `DISPLAY` and `XAUTHORITY` are set in the service file (should be automatic)
 - Verify zenity is installed: `which zenity`
-- Check logs: `journalctl --user -u force-pomodoro.service`
+- Check logs: `journalctl --user -u autodoro.service`
 
 ### Timer not pausing during meetings
 
@@ -104,7 +104,7 @@ The script continuously monitors:
 
 ### Service doesn't start on login
 
-- Verify it's enabled: `systemctl --user is-enabled force-pomodoro.service`
+- Verify it's enabled: `systemctl --user is-enabled autodoro.service`
 - Check if `graphical-session.target` is available on your system
 
 ## License

@@ -10,7 +10,7 @@ TIMER=$WORK_TIME
 WAS_IN_MEETING=false
 ZENITY_PID=""
 
-echo "[$(date +%H:%M)] Pomodoro Guard: Monitoring mic via PipeWire/PulseAudio..."
+echo "[$(date +%H:%M)] Autodoro: Monitoring mic via PipeWire/PulseAudio..."
 
 while true; do
     # 1. MEETING DETECTION
@@ -37,7 +37,7 @@ while true; do
     if [ $TIMER -le $WARNING_THRESHOLD ] && [ -z "$ZENITY_PID" ]; then
         echo "[$(date +%H:%M)] Triggering warning (Time remaining: ${TIMER}s)."
         
-        zenity --question --title="Pomodoro Guard" \
+        zenity --question --title="Autodoro" \
                --text="Time's almost up! Computer will auto-lock in $TIMER seconds." \
                --ok-label="Delay 25m" --cancel-label="Lock Now" --timeout=$TIMER &
         
