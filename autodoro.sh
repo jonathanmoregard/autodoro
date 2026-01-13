@@ -13,6 +13,13 @@ ZENITY_PID=""
 echo "[$(date +%H:%M)] Autodoro: Monitoring mic via PipeWire/PulseAudio..."
 
 while true; do
+    # 0. LOCK DETECTION (Cinnamon-specific)
+    # If the screensaver is active, don't count down, don't trigger popups.
+    if cinnamon-screensaver-command -q 2>/dev/null | grep -q "is active"; then
+        sleep $CHECK_INTERVAL
+        continue
+    fi
+
     # 1. MEETING DETECTION
     if pactl list short source-outputs | grep -q '^[0-9]'; then
         if [ "$WAS_IN_MEETING" = false ]; then
@@ -58,6 +65,7 @@ while true; do
                 # Timeout (5), Manual Lock (1), or Window Closed
                 echo "[$(date +%H:%M)] Locking session."
                 dm-tool lock
+                sleep 2  # Small buffer for Cinnamon to register the lock
                 TIMER=$WORK_TIME
             fi
             ZENITY_PID=""
@@ -66,6 +74,7 @@ while true; do
             echo "[$(date +%H:%M)] Time expired. Automatic lock."
             kill $ZENITY_PID 2>/dev/null
             dm-tool lock
+            sleep 2  # Small buffer for Cinnamon to register the lock
             TIMER=$WORK_TIME
             ZENITY_PID=""
         fi
