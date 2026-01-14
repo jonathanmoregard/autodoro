@@ -64,7 +64,7 @@ while true; do
             else
                 # Timeout (5), Manual Lock (1), or Window Closed
                 echo "[$(date +%H:%M)] Locking session."
-                dm-tool lock
+                cinnamon-screensaver-command -l
                 sleep 2  # Small buffer for Cinnamon to register the lock
                 TIMER=$WORK_TIME
             fi
@@ -73,7 +73,7 @@ while true; do
             # Failsafe: Timer hit zero but popup is still hanging
             echo "[$(date +%H:%M)] Time expired. Automatic lock."
             kill $ZENITY_PID 2>/dev/null
-            dm-tool lock
+            cinnamon-screensaver-command -l
             sleep 2  # Small buffer for Cinnamon to register the lock
             TIMER=$WORK_TIME
             ZENITY_PID=""
