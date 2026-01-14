@@ -8,6 +8,7 @@ CHECK_INTERVAL=5
 
 TIMER=$WORK_TIME
 WAS_IN_MEETING=false
+WAS_LOCKED=false
 ZENITY_PID=""
 
 echo "[$(date +%H:%M)] Autodoro: Monitoring mic via PipeWire/PulseAudio..."
@@ -16,8 +17,18 @@ while true; do
     # 0. LOCK DETECTION (Cinnamon-specific)
     # If the screensaver is active, don't count down, don't trigger popups.
     if cinnamon-screensaver-command -q 2>/dev/null | grep -q "is active"; then
+        WAS_LOCKED=true
         sleep $CHECK_INTERVAL
         continue
+    fi
+    
+    # Transition: Just unlocked - reset timer to give fresh start
+    if [ "$WAS_LOCKED" = true ]; then
+        echo "[$(date +%H:%M)] Screen unlocked. Resetting timer."
+        TIMER=$WORK_TIME
+        WAS_LOCKED=false
+        # Kill any lingering popup
+        [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null && ZENITY_PID=""
     fi
 
     # 1. MEETING DETECTION
