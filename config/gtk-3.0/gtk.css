@@ -1,0 +1,27 @@
+window {
+    background-color: #cc0000;
+}
+
+dialog {
+    background-color: #cc0000;
+}
+
+box, messagedialog, .dialog-vbox {
+    background-color: #cc0000;
+}
+
+label {
+    color: white;
+    font-weight: bold;
+}
+
+button {
+    background-color: #990000;
+    color: white;
+    border: 1px solid #ff3333;
+    font-weight: bold;
+}
+
+button:hover {
+    background-color: #ff3333;
+}

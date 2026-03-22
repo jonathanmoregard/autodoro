@@ -6,6 +6,7 @@ POST_MEETING_TIME=900   # 15 min
 WARNING_THRESHOLD=60    # 1 min
 CHECK_INTERVAL=5        
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TIMER=$WORK_TIME
 WAS_IN_MEETING=false
 WAS_LOCKED=false
@@ -55,9 +56,11 @@ while true; do
     if [ $TIMER -le $WARNING_THRESHOLD ] && [ -z "$ZENITY_PID" ]; then
         echo "[$(date +%H:%M)] Triggering warning (Time remaining: ${TIMER}s)."
         
+        XDG_CONFIG_HOME="$SCRIPT_DIR/config" \
         zenity --question --title="Autodoro" \
-               --text="Time's almost up! Computer will auto-lock in $TIMER seconds." \
-               --ok-label="Delay 25m" --cancel-label="Lock Now" --timeout=$TIMER &
+               --text="<span foreground='white' font='16'><b>Time's almost up!</b></span>\n\nComputer will auto-lock in <b>$TIMER seconds</b>." \
+               --ok-label="Delay 25m" --cancel-label="Lock Now" --timeout=$TIMER \
+               --icon-name=dialog-warning --width=350 &
         
         ZENITY_PID=$!
     fi
