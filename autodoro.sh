@@ -41,7 +41,22 @@ while true; do
     fi
 
     # 1. MEETING DETECTION
-    if pactl list source-outputs 2>/dev/null | grep -v 'application.name = "cinnamon"' | grep -q 'application.name'; then
+    # Exclude cinnamon (volume applet) and whisper-writer (transcription tool) from mic detection.
+    # We match by PID so this works regardless of what app name sounddevice/PortAudio registers.
+    MIC_IN_USE=$(pactl list source-outputs 2>/dev/null | python3 -c "
+import sys, subprocess
+whisper_pids = set(subprocess.run(['pgrep', '-f', 'whisper-writer'], capture_output=True, text=True).stdout.split())
+text = sys.stdin.read()
+for block in text.split('\n\n'):
+    name = pid = None
+    for line in block.split('\n'):
+        s = line.strip()
+        if s.startswith('application.name = '): name = s.split('= ',1)[1].strip('\"')
+        elif s.startswith('application.process.id = '): pid = s.split('= ',1)[1].strip('\"')
+    if name and name != 'cinnamon' and pid not in whisper_pids:
+        print('yes'); break
+" 2>/dev/null)
+    if [ "$MIC_IN_USE" = "yes" ]; then
         if [ "$WAS_IN_MEETING" = false ]; then
             echo "[$(date +%H:%M)] Meeting detected. Timer paused."
             WAS_IN_MEETING=true
