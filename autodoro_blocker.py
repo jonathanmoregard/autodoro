@@ -28,7 +28,6 @@ break_done = [False]
 
 def on_timeout():
     if not DEV_MODE:
-        unmute()
         subprocess.Popen(['paplay', PING_SOUND])
     break_done[0] = True
     # Swap input for an Open button
@@ -37,7 +36,11 @@ def on_timeout():
     card.remove(error_label)
     open_btn = Gtk.Button(label="Open")
     open_btn.get_style_context().add_class('open-button')
-    open_btn.connect('clicked', lambda *_: Gtk.main_quit())
+    def on_open(_):
+        if not DEV_MODE:
+            unmute()
+        Gtk.main_quit()
+    open_btn.connect('clicked', on_open)
     card.add(open_btn)
     cards_box.show_all()
     open_btn.grab_focus()

@@ -33,6 +33,11 @@ while true; do
         # Kill any lingering popup
         [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null && ZENITY_PID=""
         [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE" && POPUP_RESULT_FILE=""
+        # Kill blocker if it was running during lock/logout
+        BLOCKER_PID=$(cat /tmp/autodoro_blocker.pid 2>/dev/null)
+        [[ -n $BLOCKER_PID ]] && kill $BLOCKER_PID 2>/dev/null
+        rm -f /tmp/autodoro_blocker.pid
+        pactl set-sink-mute @DEFAULT_SINK@ 0
     fi
 
     # 1. MEETING DETECTION
