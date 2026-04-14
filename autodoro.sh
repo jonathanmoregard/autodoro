@@ -88,20 +88,18 @@ while true; do
                 TIMER=900  # 15 min
             else
                 # Timeout, Manual Lock, or Window Closed
-                echo "[$(date +%H:%M)] Locking session."
-                cinnamon-screensaver-command -l
-                sleep 2  # Small buffer for Cinnamon to register the lock
+                echo "[$(date +%H:%M)] Blocking screen for break."
+                python3 "$SCRIPT_DIR/autodoro_blocker.py"
                 TIMER=$WORK_TIME
             fi
             ZENITY_PID=""
         elif [ $TIMER -le 0 ]; then
             # Failsafe: Timer hit zero but popup is still hanging
-            echo "[$(date +%H:%M)] Time expired. Automatic lock."
+            echo "[$(date +%H:%M)] Time expired. Blocking screen for break."
             kill $ZENITY_PID 2>/dev/null
             rm -f "$POPUP_RESULT_FILE"
             POPUP_RESULT_FILE=""
-            cinnamon-screensaver-command -l
-            sleep 2  # Small buffer for Cinnamon to register the lock
+            python3 "$SCRIPT_DIR/autodoro_blocker.py"
             TIMER=$WORK_TIME
             ZENITY_PID=""
         fi
