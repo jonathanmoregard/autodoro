@@ -33,7 +33,7 @@ while true; do
     fi
 
     # 1. MEETING DETECTION
-    if pactl list short source-outputs | grep -q '^[0-9]'; then
+    if pactl list source-outputs 2>/dev/null | grep -v 'application.name = "cinnamon"' | grep -q 'application.name'; then
         if [ "$WAS_IN_MEETING" = false ]; then
             echo "[$(date +%H:%M)] Meeting detected. Timer paused."
             WAS_IN_MEETING=true
