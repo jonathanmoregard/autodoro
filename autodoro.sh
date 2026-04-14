@@ -1,18 +1,45 @@
 #!/bin/bash
 
-# --- CONFIGURATION ---
-WORK_TIME=1500           # 25 min
-POST_MEETING_TIME=900   # 15 min
-WARNING_THRESHOLD=60    # 1 min
+# --- CONFIGURATION DEFAULTS ---
+# These are overridden by config.defaults, then by ~/.config/autodoro/config.
+WORK_TIME=1500
+POST_MEETING_TIME=900
+WARNING_THRESHOLD=60
 CHECK_INTERVAL=5
-DELAY_UNLOCK_SECS=3     # seconds before delay button unlocks
+DELAY_UNLOCK_SECS=3
+MIC_EXCLUDE_PATTERNS=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TIMER=$WORK_TIME
+
+# Load a key=value config file. Repeated keys like mic_exclude are accumulated.
+_load_config() {
+    local file="$1"
+    [[ -f "$file" ]] || return
+    while IFS='=' read -r key value; do
+        key="${key%%#*}"                              # strip inline comments
+        key="${key//[[:space:]]/}"                    # strip whitespace
+        [[ -z "$key" ]] && continue
+        value="${value%%#*}"                          # strip inline comments
+        value="${value#"${value%%[![:space:]]*}"}"    # ltrim
+        value="${value%"${value##*[![:space:]]}"}"    # rtrim
+        case "$key" in
+            work_time)           WORK_TIME="$value" ;;
+            post_meeting_time)   POST_MEETING_TIME="$value" ;;
+            warning_threshold)   WARNING_THRESHOLD="$value" ;;
+            check_interval)      CHECK_INTERVAL="$value" ;;
+            delay_unlock_secs)   DELAY_UNLOCK_SECS="$value" ;;
+            mic_exclude)         MIC_EXCLUDE_PATTERNS+=("$value") ;;
+        esac
+    done < "$file"
+}
+_load_config "$SCRIPT_DIR/config.defaults"
+_load_config "${XDG_CONFIG_HOME:-$HOME/.config}/autodoro/config"
+
 WAS_IN_MEETING=false
 WAS_LOCKED=false
 ZENITY_PID=""
 POPUP_RESULT_FILE=""
+TIMER=$WORK_TIME
 
 echo "[$(date +%H:%M)] Autodoro: Monitoring mic via PipeWire/PulseAudio..."
 
@@ -41,19 +68,23 @@ while true; do
     fi
 
     # 1. MEETING DETECTION
-    # Exclude cinnamon (volume applet) and whisper-writer (transcription tool) from mic detection.
-    # We match by PID so this works regardless of what app name sounddevice/PortAudio registers.
-    MIC_IN_USE=$(pactl list source-outputs 2>/dev/null | python3 -c "
-import sys, subprocess
-whisper_pids = set(subprocess.run(['pgrep', '-f', 'whisper-writer'], capture_output=True, text=True).stdout.split())
+    # Resolve excluded PIDs from configured pgrep patterns, then check source-outputs.
+    _EXCLUDED_PIDS=""
+    for _pat in "${MIC_EXCLUDE_PATTERNS[@]}"; do
+        _EXCLUDED_PIDS="$_EXCLUDED_PIDS $(pgrep -f "$_pat" 2>/dev/null | tr '\n' ' ')"
+    done
+
+    MIC_IN_USE=$(AUTODORO_EXCLUDED_PIDS="$_EXCLUDED_PIDS" pactl list source-outputs 2>/dev/null | python3 -c "
+import sys, os
+excluded = set(os.environ.get('AUTODORO_EXCLUDED_PIDS', '').split())
 text = sys.stdin.read()
 for block in text.split('\n\n'):
     name = pid = None
     for line in block.split('\n'):
         s = line.strip()
-        if s.startswith('application.name = '): name = s.split('= ',1)[1].strip('\"')
-        elif s.startswith('application.process.id = '): pid = s.split('= ',1)[1].strip('\"')
-    if name and name != 'cinnamon' and pid not in whisper_pids:
+        if s.startswith('application.name = '): name = s.split('= ', 1)[1].strip('\"')
+        elif s.startswith('application.process.id = '): pid = s.split('= ', 1)[1].strip('\"')
+    if name and name != 'cinnamon' and pid not in excluded:
         print('yes'); break
 " 2>/dev/null)
     if [ "$MIC_IN_USE" = "yes" ]; then
