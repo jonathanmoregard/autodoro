@@ -10,7 +10,7 @@ import os
 import subprocess
 
 PASSPHRASE    = "I need to enter now"
-IMAGE_PATH    = "/home/jonathan/Repos/intender/src/public/assets/misty-1920.webp"
+IMAGE_PATH    = "/home/jonathan/Repos/intender/src/public/assets/misty-1280.webp"
 PING_SOUND    = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gong.mp3")
 args          = sys.argv[1:]
 DEV_MODE      = '--dev' in args
@@ -24,11 +24,23 @@ def mute():
 def unmute():
     subprocess.run(['pactl', 'set-sink-mute', '@DEFAULT_SINK@', '0'], capture_output=True)
 
+break_done = [False]
+
 def on_timeout():
     if not DEV_MODE:
         unmute()
         subprocess.Popen(['paplay', PING_SOUND])
-    Gtk.main_quit()
+    break_done[0] = True
+    # Swap input for an Open button
+    instruction.set_markup('Break complete.')
+    card.remove(entry)
+    card.remove(error_label)
+    open_btn = Gtk.Button(label="Open")
+    open_btn.get_style_context().add_class('open-button')
+    open_btn.connect('clicked', lambda *_: Gtk.main_quit())
+    card.add(open_btn)
+    cards_box.show_all()
+    open_btn.grab_focus()
     return False
 
 def on_early_exit():
@@ -83,6 +95,28 @@ entry:focus {
     font-size: 13px;
     font-weight: 500;
 }
+.open-button {
+    background-color: #898e21;
+    border-radius: 8px;
+    border: none;
+    color: white;
+    font-size: 19px;
+    font-weight: 600;
+    padding: 10px 32px;
+    min-width: 400px;
+}
+.open-button:hover {
+    background-color: #6e7219;
+}
+.timer-card {
+    min-width: 0;
+    padding: 16px 32px;
+}
+.timer-label {
+    color: rgba(48, 51, 46, 0.9);
+    font-size: 48px;
+    font-weight: 700;
+}
 """
 provider = Gtk.CssProvider()
 provider.load_from_data(css)
@@ -103,10 +137,32 @@ win.add(overlay)
 pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(IMAGE_PATH, sw, sh, False)
 overlay.add(Gtk.Image.new_from_pixbuf(pixbuf))
 
+# --- Timer card ---
+remaining = [duration_secs]
+
+timer_label = Gtk.Label()
+timer_label.get_style_context().add_class('timer-label')
+
+def fmt_time(secs):
+    return f'{secs // 60}:{secs % 60:02d}'
+
+timer_label.set_text(fmt_time(duration_secs))
+
+timer_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+timer_card.set_halign(Gtk.Align.CENTER)
+timer_card.get_style_context().add_class('card')
+timer_card.get_style_context().add_class('timer-card')
+timer_card.add(timer_label)
+
+def update_countdown():
+    remaining[0] -= 1
+    timer_label.set_text(fmt_time(remaining[0]))
+    return remaining[0] > 0
+
+GLib.timeout_add(1000, update_countdown)
+
 # --- Card ---
 card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
-card.set_halign(Gtk.Align.CENTER)
-card.set_valign(Gtk.Align.CENTER)
 card.get_style_context().add_class('card')
 
 # Instruction with passphrase inline
@@ -130,7 +186,14 @@ error_label.set_halign(Gtk.Align.CENTER)
 card.add(instruction)
 card.add(entry)
 card.add(error_label)
-overlay.add_overlay(card)
+
+# Stack both cards vertically, centered on screen
+cards_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+cards_box.set_halign(Gtk.Align.CENTER)
+cards_box.set_valign(Gtk.Align.CENTER)
+cards_box.add(timer_card)
+cards_box.add(card)
+overlay.add_overlay(cards_box)
 
 win.show_all()
 error_label.hide()
@@ -156,6 +219,9 @@ def on_activate(widget):
         GLib.timeout_add(1400, clear_error)
 
 def on_key_press(widget, event):
+    if break_done[0] and event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+        Gtk.main_quit()
+        return True
     if event.keyval == Gdk.KEY_Escape:
         entry.set_text("")
         entry.get_style_context().remove_class('error')
