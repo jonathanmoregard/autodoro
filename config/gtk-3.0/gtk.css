@@ -16,12 +16,20 @@ label {
 }
 
 button {
-    background-color: #990000;
+    background-color: #550000;
     color: white;
-    border: 1px solid #ff3333;
+    border: 1px solid #880000;
     font-weight: bold;
+    font-size: 16px;
+    padding: 10px 24px;
 }
 
 button:hover {
     background-color: #ff3333;
+}
+
+button:disabled {
+    background-color: #888888;
+    color: #bbbbbb;
+    border: 1px solid #aaaaaa;
 }

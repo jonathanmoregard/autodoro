@@ -4,13 +4,15 @@
 WORK_TIME=1500           # 25 min
 POST_MEETING_TIME=900   # 15 min
 WARNING_THRESHOLD=60    # 1 min
-CHECK_INTERVAL=5        
+CHECK_INTERVAL=5
+DELAY_UNLOCK_SECS=3     # seconds before delay button unlocks
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TIMER=$WORK_TIME
 WAS_IN_MEETING=false
 WAS_LOCKED=false
 ZENITY_PID=""
+POPUP_RESULT_FILE=""
 
 echo "[$(date +%H:%M)] Autodoro: Monitoring mic via PipeWire/PulseAudio..."
 
@@ -22,7 +24,7 @@ while true; do
         sleep $CHECK_INTERVAL
         continue
     fi
-    
+
     # Transition: Just unlocked - reset timer to give fresh start
     if [ "$WAS_LOCKED" = true ]; then
         echo "[$(date +%H:%M)] Screen unlocked. Resetting timer."
@@ -30,6 +32,7 @@ while true; do
         WAS_LOCKED=false
         # Kill any lingering popup
         [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null && ZENITY_PID=""
+        [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE" && POPUP_RESULT_FILE=""
     fi
 
     # 1. MEETING DETECTION
@@ -39,6 +42,7 @@ while true; do
             WAS_IN_MEETING=true
             # Kill popup if it was open when meeting started
             [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null && ZENITY_PID=""
+            [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE" && POPUP_RESULT_FILE=""
         fi
         sleep $CHECK_INTERVAL
         continue # Skip the rest of the loop; timer is frozen
@@ -55,28 +59,35 @@ while true; do
     # Only trigger if timer is low AND no popup is already active
     if [ $TIMER -le $WARNING_THRESHOLD ] && [ -z "$ZENITY_PID" ]; then
         echo "[$(date +%H:%M)] Triggering warning (Time remaining: ${TIMER}s)."
-        
-        XDG_CONFIG_HOME="$SCRIPT_DIR/config" \
-        zenity --question --title="Autodoro" \
-               --text="<span foreground='white' font='16'><b>Time's almost up!</b></span>\n\nComputer will auto-lock in <b>$TIMER seconds</b>." \
-               --ok-label="Delay 25m" --cancel-label="Lock Now" --timeout=$TIMER \
-               --icon-name=dialog-warning --width=350 &
-        
+        POPUP_RESULT_FILE=$(mktemp)
+        CAPTURED_TIMER=$TIMER
+
+        (
+            python3 "$SCRIPT_DIR/autodoro_popup.py" "$CAPTURED_TIMER" "$DELAY_UNLOCK_SECS"
+            if [ $? -eq 0 ]; then
+                echo "DELAY" > "$POPUP_RESULT_FILE"
+            else
+                echo "LOCK"  > "$POPUP_RESULT_FILE"
+            fi
+        ) &
+
         ZENITY_PID=$!
     fi
 
     # 4. MONITOR POPUP RESPONSE
     if [ -n "$ZENITY_PID" ]; then
         if ! ps -p $ZENITY_PID > /dev/null; then
-            # Zenity process finished; wait for it to get the exit code
+            # Subshell finished; read result from tmpfile
             wait $ZENITY_PID
-            EXIT_CODE=$?
-            
-            if [ $EXIT_CODE -eq 0 ]; then
+            RESULT=$(cat "$POPUP_RESULT_FILE" 2>/dev/null)
+            rm -f "$POPUP_RESULT_FILE"
+            POPUP_RESULT_FILE=""
+
+            if [ "$RESULT" = "DELAY" ]; then
                 echo "[$(date +%H:%M)] User clicked Delay."
-                TIMER=1500  # 25 min
+                TIMER=900  # 15 min
             else
-                # Timeout (5), Manual Lock (1), or Window Closed
+                # Timeout, Manual Lock, or Window Closed
                 echo "[$(date +%H:%M)] Locking session."
                 cinnamon-screensaver-command -l
                 sleep 2  # Small buffer for Cinnamon to register the lock
@@ -87,6 +98,8 @@ while true; do
             # Failsafe: Timer hit zero but popup is still hanging
             echo "[$(date +%H:%M)] Time expired. Automatic lock."
             kill $ZENITY_PID 2>/dev/null
+            rm -f "$POPUP_RESULT_FILE"
+            POPUP_RESULT_FILE=""
             cinnamon-screensaver-command -l
             sleep 2  # Small buffer for Cinnamon to register the lock
             TIMER=$WORK_TIME
@@ -98,7 +111,7 @@ while true; do
     # We sleep first to ensure the first iteration doesn't immediately lose 5s
     sleep $CHECK_INTERVAL
     TIMER=$((TIMER - CHECK_INTERVAL))
-    
+
     # Final safety clamp
     if [ $TIMER -lt 0 ]; then TIMER=0; fi
 done
