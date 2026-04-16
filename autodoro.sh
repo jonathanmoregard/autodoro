@@ -58,8 +58,8 @@ while true; do
         TIMER=$WORK_TIME
         WAS_LOCKED=false
         # Kill any lingering popup
-        [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null && ZENITY_PID=""
-        [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE" && POPUP_RESULT_FILE=""
+        [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null; ZENITY_PID=""
+        [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE"; POPUP_RESULT_FILE=""
         # Kill blocker if it was running during lock/logout
         BLOCKER_PID=$(cat /tmp/autodoro_blocker.pid 2>/dev/null)
         [[ -n $BLOCKER_PID ]] && kill $BLOCKER_PID 2>/dev/null
@@ -92,8 +92,8 @@ for block in text.split('\n\n'):
             echo "[$(date +%H:%M)] Meeting detected. Timer paused."
             WAS_IN_MEETING=true
             # Kill popup if it was open when meeting started
-            [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null && ZENITY_PID=""
-            [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE" && POPUP_RESULT_FILE=""
+            [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null; ZENITY_PID=""
+            [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE"; POPUP_RESULT_FILE=""
         fi
         sleep $CHECK_INTERVAL
         continue # Skip the rest of the loop; timer is frozen
