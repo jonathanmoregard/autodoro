@@ -7,6 +7,7 @@ POST_MEETING_TIME=900
 WARNING_THRESHOLD=60
 CHECK_INTERVAL=5
 DELAY_UNLOCK_SECS=3
+MAX_DELAYS=2
 MIC_EXCLUDE_PATTERNS=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -28,6 +29,7 @@ _load_config() {
             warning_threshold)   WARNING_THRESHOLD="$value" ;;
             check_interval)      CHECK_INTERVAL="$value" ;;
             delay_unlock_secs)   DELAY_UNLOCK_SECS="$value" ;;
+            max_delays)          MAX_DELAYS="$value" ;;
             mic_exclude)         MIC_EXCLUDE_PATTERNS+=("$value") ;;
         esac
     done < "$file"
@@ -40,6 +42,7 @@ WAS_LOCKED=false
 ZENITY_PID=""
 POPUP_RESULT_FILE=""
 TIMER=$WORK_TIME
+DELAY_COUNT=0
 
 echo "[$(date +%H:%M)] Autodoro: Monitoring mic via PipeWire/PulseAudio..."
 
@@ -123,22 +126,30 @@ for block in text.split('\n\n'):
     fi
 
     # 3. WARNING POPUP LOGIC
-    # Only trigger if timer is low AND no popup is already active
+    # Only trigger if timer is low AND no popup is already active.
+    # After MAX_DELAYS consecutive delays, skip the popup and force a break.
     if [ $TIMER -le $WARNING_THRESHOLD ] && [ -z "$ZENITY_PID" ]; then
-        echo "[$(date +%H:%M)] Triggering warning (Time remaining: ${TIMER}s)."
-        POPUP_RESULT_FILE=$(mktemp)
-        CAPTURED_TIMER=$TIMER
+        if [ $DELAY_COUNT -ge $MAX_DELAYS ]; then
+            echo "[$(date +%H:%M)] Delay limit reached ($DELAY_COUNT/$MAX_DELAYS). Forcing break."
+            python3 "$SCRIPT_DIR/autodoro_blocker.py"
+            TIMER=$WORK_TIME
+            DELAY_COUNT=0
+        else
+            echo "[$(date +%H:%M)] Triggering warning (Time remaining: ${TIMER}s)."
+            POPUP_RESULT_FILE=$(mktemp)
+            CAPTURED_TIMER=$TIMER
 
-        (
-            python3 "$SCRIPT_DIR/autodoro_popup.py" "$CAPTURED_TIMER" "$DELAY_UNLOCK_SECS"
-            if [ $? -eq 0 ]; then
-                echo "DELAY" > "$POPUP_RESULT_FILE"
-            else
-                echo "LOCK"  > "$POPUP_RESULT_FILE"
-            fi
-        ) &
+            (
+                python3 "$SCRIPT_DIR/autodoro_popup.py" "$CAPTURED_TIMER" "$DELAY_UNLOCK_SECS"
+                if [ $? -eq 0 ]; then
+                    echo "DELAY" > "$POPUP_RESULT_FILE"
+                else
+                    echo "LOCK"  > "$POPUP_RESULT_FILE"
+                fi
+            ) &
 
-        ZENITY_PID=$!
+            ZENITY_PID=$!
+        fi
     fi
 
     # 4. MONITOR POPUP RESPONSE
@@ -151,13 +162,15 @@ for block in text.split('\n\n'):
             POPUP_RESULT_FILE=""
 
             if [ "$RESULT" = "DELAY" ]; then
-                echo "[$(date +%H:%M)] User clicked Delay."
+                DELAY_COUNT=$((DELAY_COUNT + 1))
+                echo "[$(date +%H:%M)] User clicked Delay ($DELAY_COUNT/$MAX_DELAYS)."
                 TIMER=900  # 15 min
             else
                 # Timeout, Manual Lock, or Window Closed
                 echo "[$(date +%H:%M)] Blocking screen for break."
                 python3 "$SCRIPT_DIR/autodoro_blocker.py"
                 TIMER=$WORK_TIME
+                DELAY_COUNT=0
             fi
             ZENITY_PID=""
         elif [ $TIMER -le 0 ]; then
@@ -168,6 +181,7 @@ for block in text.split('\n\n'):
             POPUP_RESULT_FILE=""
             python3 "$SCRIPT_DIR/autodoro_blocker.py"
             TIMER=$WORK_TIME
+            DELAY_COUNT=0
             ZENITY_PID=""
         fi
     fi
