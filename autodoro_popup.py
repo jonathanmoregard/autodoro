@@ -54,7 +54,8 @@ def on_timeout(_):
     dialog.response(Gtk.ResponseType.CANCEL)
     return False
 
-GLib.timeout_add(unlock_secs * 1000, enable_delay, None)
+if unlock_secs >= 0:
+    GLib.timeout_add(unlock_secs * 1000, enable_delay, None)
 GLib.timeout_add(timer_secs  * 1000, on_timeout,   None)
 
 # --- Run ---

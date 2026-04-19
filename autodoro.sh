@@ -41,6 +41,7 @@ _load_config "${XDG_CONFIG_HOME:-$HOME/.config}/autodoro/config"
 
 WAS_IN_MEETING=false
 WAS_LOCKED=false
+WAS_IDLE=false
 ZENITY_PID=""
 POPUP_RESULT_FILE=""
 TIMER=$WORK_TIME
@@ -129,29 +130,28 @@ for block in text.split('\n\n'):
 
     # 3. WARNING POPUP LOGIC
     # Only trigger if timer is low AND no popup is already active.
-    # After MAX_DELAYS consecutive delays, skip the popup and force a break.
+    # After MAX_DELAYS consecutive delays, show popup with Delay button permanently disabled.
     if [ $TIMER -le $WARNING_THRESHOLD ] && [ -z "$ZENITY_PID" ]; then
         if [ $DELAY_COUNT -ge $MAX_DELAYS ]; then
-            echo "[$(date +%H:%M)] Delay limit reached ($DELAY_COUNT/$MAX_DELAYS). Forcing break."
-            python3 "$SCRIPT_DIR/autodoro_blocker.py"
-            TIMER=$WORK_TIME
-            DELAY_COUNT=0
+            echo "[$(date +%H:%M)] Delay limit reached ($DELAY_COUNT/$MAX_DELAYS). Forced break popup (no delay)."
+            UNLOCK_SECS_ARG=-1
         else
             echo "[$(date +%H:%M)] Triggering warning (Time remaining: ${TIMER}s)."
-            POPUP_RESULT_FILE=$(mktemp)
-            CAPTURED_TIMER=$TIMER
-
-            (
-                python3 "$SCRIPT_DIR/autodoro_popup.py" "$CAPTURED_TIMER" "$DELAY_UNLOCK_SECS"
-                if [ $? -eq 0 ]; then
-                    echo "DELAY" > "$POPUP_RESULT_FILE"
-                else
-                    echo "LOCK"  > "$POPUP_RESULT_FILE"
-                fi
-            ) &
-
-            ZENITY_PID=$!
+            UNLOCK_SECS_ARG=$DELAY_UNLOCK_SECS
         fi
+        POPUP_RESULT_FILE=$(mktemp)
+        CAPTURED_TIMER=$TIMER
+
+        (
+            python3 "$SCRIPT_DIR/autodoro_popup.py" "$CAPTURED_TIMER" "$UNLOCK_SECS_ARG"
+            if [ $? -eq 0 ]; then
+                echo "DELAY" > "$POPUP_RESULT_FILE"
+            else
+                echo "LOCK"  > "$POPUP_RESULT_FILE"
+            fi
+        ) &
+
+        ZENITY_PID=$!
     fi
 
     # 4. MONITOR POPUP RESPONSE
@@ -191,9 +191,24 @@ for block in text.split('\n\n'):
     # 5. SINGLE DECREMENT & SLEEP
     # We sleep first to ensure the first iteration doesn't immediately lose 5s
     sleep $CHECK_INTERVAL
-    # Pause countdown if user has been idle longer than IDLE_PAUSE_SECS
+    # Reset countdown if user has been idle longer than IDLE_PAUSE_SECS.
+    # Returning after a long break should give a fresh work cycle.
     IDLE_MS=$(xprintidle 2>/dev/null || echo 0)
-    if [ "$IDLE_MS" -lt $((IDLE_PAUSE_SECS * 1000)) ]; then
+    if [ "$IDLE_MS" -ge $((IDLE_PAUSE_SECS * 1000)) ]; then
+        if [ "$WAS_IDLE" != true ]; then
+            echo "[$(date +%H:%M)] Idle ${IDLE_PAUSE_SECS}s+. Resetting timer."
+            WAS_IDLE=true
+        fi
+        TIMER=$WORK_TIME
+        DELAY_COUNT=0
+        if [ -n "$ZENITY_PID" ]; then
+            kill $ZENITY_PID 2>/dev/null
+            ZENITY_PID=""
+            [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE"
+            POPUP_RESULT_FILE=""
+        fi
+    else
+        WAS_IDLE=false
         TIMER=$((TIMER - CHECK_INTERVAL))
     fi
 
