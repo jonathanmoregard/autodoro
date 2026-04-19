@@ -11,9 +11,15 @@ delay_unlock_secs=3     # Seconds before the Delay button becomes clickable
 max_delays=2            # Max consecutive delays before forcing a break
 idle_pause_secs=300     # Pause timer when user idle longer than this (seconds)
 
-# Processes to exclude from meeting detection.
-# Any process whose pgrep -f pattern matches here won't trigger a meeting pause.
+# Mic sources to exclude from meeting detection.
+# Each pattern is matched as a case-insensitive substring against the
+# source-output's application.name, application.process.binary, and node.name
+# (as reported by `pactl list source-outputs`). If any excluded pattern matches
+# the source-output capturing the mic, it doesn't count as a meeting.
 # Add your own in ~/.config/autodoro/config — one mic_exclude line per pattern.
 # Example:
 # mic_exclude=whisper-writer
 # mic_exclude=arecord
+
+# Cinnamon's volume applet taps the mic; never treat that as a meeting.
+mic_exclude=cinnamon

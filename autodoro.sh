@@ -74,40 +74,31 @@ while true; do
     fi
 
     # 1. MEETING DETECTION
-    # Resolve excluded PIDs from configured pgrep patterns, then check source-outputs.
-    _EXCLUDED_PIDS=""
-    for _pat in "${MIC_EXCLUDE_PATTERNS[@]}"; do
-        _EXCLUDED_PIDS="$_EXCLUDED_PIDS $(pgrep -f "$_pat" 2>/dev/null | tr '\n' ' ')"
-    done
-
-    _PW_DUMP=$(pw-dump 2>/dev/null)
-    MIC_IN_USE=$(AUTODORO_EXCLUDED_PIDS="$_EXCLUDED_PIDS" AUTODORO_PW_DUMP="$_PW_DUMP" pactl list source-outputs 2>/dev/null | python3 -c "
-import sys, os, json
-excluded = set(os.environ.get('AUTODORO_EXCLUDED_PIDS', '').split())
-# Build name -> sec.pid map from pw-dump Client objects (needed for ALSA-bridge
-# clients, which omit application.process.id in pactl but carry real PID as
-# pipewire.sec.pid in pw-dump).
-name_to_secpid = {}
-try:
-    for obj in json.loads(os.environ.get('AUTODORO_PW_DUMP', '[]') or '[]'):
-        if obj.get('type') == 'PipeWire:Interface:Client':
-            props = obj.get('info', {}).get('props', {})
-            nm = props.get('application.name')
-            sp = props.get('pipewire.sec.pid')
-            if nm and sp is not None:
-                name_to_secpid[nm] = str(sp)
-except Exception:
-    pass
+    # Find any mic source-output whose identifiers don't match an exclude pattern.
+    # Matching is by source-output NAME (case-insensitive substring against
+    # application.name, application.process.binary, and node.name), so we count
+    # actual mic events rather than whether some process happens to be running.
+    MIC_IN_USE=$(AUTODORO_EXCLUDES=$(printf '%s\n' "${MIC_EXCLUDE_PATTERNS[@]}") \
+        pactl list source-outputs 2>/dev/null | python3 -c "
+import sys, os
+excludes = [p.lower() for p in os.environ.get('AUTODORO_EXCLUDES', '').splitlines() if p]
 text = sys.stdin.read()
 for block in text.split('\n\n'):
-    name = pid = None
+    name = binary = node = None
     for line in block.split('\n'):
         s = line.strip()
-        if s.startswith('application.name = '): name = s.split('= ', 1)[1].strip('\"')
-        elif s.startswith('application.process.id = '): pid = s.split('= ', 1)[1].strip('\"')
-    effective_pid = pid or name_to_secpid.get(name)
-    if name and name != 'cinnamon' and effective_pid not in excluded:
-        print('yes|' + str(name) + '|' + str(effective_pid)); break
+        if s.startswith('application.name = '):
+            name = s.split('= ', 1)[1].strip('\"')
+        elif s.startswith('application.process.binary = '):
+            binary = s.split('= ', 1)[1].strip('\"')
+        elif s.startswith('node.name = '):
+            node = s.split('= ', 1)[1].strip('\"')
+    if not name:
+        continue
+    fields = [f.lower() for f in (name, binary, node) if f]
+    if any(pat in f for pat in excludes for f in fields):
+        continue
+    print('yes|' + name); break
 " 2>/dev/null)
     if [[ "$MIC_IN_USE" == yes\|* ]]; then
         if [ "$WAS_IN_MEETING" = false ]; then
