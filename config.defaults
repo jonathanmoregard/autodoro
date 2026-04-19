@@ -9,6 +9,7 @@ warning_threshold=60    # Show break popup when this many seconds remain
 check_interval=5        # Main loop poll interval
 delay_unlock_secs=3     # Seconds before the Delay button becomes clickable
 max_delays=2            # Max consecutive delays before forcing a break
+idle_pause_secs=300     # Pause timer when user idle longer than this (seconds)
 
 # Processes to exclude from meeting detection.
 # Any process whose pgrep -f pattern matches here won't trigger a meeting pause.

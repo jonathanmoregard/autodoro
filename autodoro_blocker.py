@@ -235,4 +235,25 @@ def on_key_press(widget, event):
 entry.connect("activate", on_activate)
 win.connect("key-press-event", on_key_press)
 GLib.timeout_add_seconds(duration_secs, on_timeout)
+
+# Exit blocker when the user unlocks the screen (i.e. transitions from
+# locked back to active). This lets a manual lock/unlock dismiss the break.
+lock_state = ['active']  # 'active' = unlocked
+def check_lock_state():
+    try:
+        out = subprocess.run(
+            ['cinnamon-screensaver-command', '-q'],
+            capture_output=True, text=True, timeout=2
+        ).stdout
+    except Exception:
+        return True
+    locked = 'is active' in out
+    if locked:
+        lock_state[0] = 'locked'
+    elif lock_state[0] == 'locked':
+        on_early_exit()
+        return False
+    return True
+
+GLib.timeout_add_seconds(1, check_lock_state)
 Gtk.main()

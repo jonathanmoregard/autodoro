@@ -8,6 +8,7 @@ WARNING_THRESHOLD=60
 CHECK_INTERVAL=5
 DELAY_UNLOCK_SECS=3
 MAX_DELAYS=2
+IDLE_PAUSE_SECS=300
 MIC_EXCLUDE_PATTERNS=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +31,7 @@ _load_config() {
             check_interval)      CHECK_INTERVAL="$value" ;;
             delay_unlock_secs)   DELAY_UNLOCK_SECS="$value" ;;
             max_delays)          MAX_DELAYS="$value" ;;
+            idle_pause_secs)     IDLE_PAUSE_SECS="$value" ;;
             mic_exclude)         MIC_EXCLUDE_PATTERNS+=("$value") ;;
         esac
     done < "$file"
@@ -189,7 +191,11 @@ for block in text.split('\n\n'):
     # 5. SINGLE DECREMENT & SLEEP
     # We sleep first to ensure the first iteration doesn't immediately lose 5s
     sleep $CHECK_INTERVAL
-    TIMER=$((TIMER - CHECK_INTERVAL))
+    # Pause countdown if user has been idle longer than IDLE_PAUSE_SECS
+    IDLE_MS=$(xprintidle 2>/dev/null || echo 0)
+    if [ "$IDLE_MS" -lt $((IDLE_PAUSE_SECS * 1000)) ]; then
+        TIMER=$((TIMER - CHECK_INTERVAL))
+    fi
 
     # Final safety clamp
     if [ $TIMER -lt 0 ]; then TIMER=0; fi
