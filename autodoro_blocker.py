@@ -222,8 +222,16 @@ def on_activate(widget):
         GLib.timeout_add(1400, clear_error)
 
 def on_key_press(widget, event):
-    if break_done[0] and event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
-        Gtk.main_quit()
+    # Handle Enter at the window level so focus drift (fullscreen +
+    # keep_above can let the WM steal focus from Entry / Open button)
+    # doesn't strand the user with a popup the buttons can dismiss but
+    # the keyboard cannot. Window receives key-press-event regardless
+    # of which child holds focus.
+    if event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter):
+        if break_done[0]:
+            on_early_exit()
+        else:
+            on_activate(entry)
         return True
     if event.keyval == Gdk.KEY_Escape:
         entry.set_text("")
@@ -256,4 +264,12 @@ def check_lock_state():
     return True
 
 GLib.timeout_add_seconds(1, check_lock_state)
-Gtk.main()
+try:
+    Gtk.main()
+finally:
+    # Defense in depth: every quit path (Open click, Enter on Open,
+    # Escape from a fresh-typing entry, screensaver-unlock fallback)
+    # must restore audio. Centralizing here means we cannot leave the
+    # sink muted by adding a new exit shortcut later.
+    if not DEV_MODE:
+        unmute()
