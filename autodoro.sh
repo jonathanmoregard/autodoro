@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # --- CONFIGURATION DEFAULTS ---
 # These are overridden by config.defaults, then by ~/.config/autodoro/config.
