@@ -25,9 +25,14 @@ def unmute():
     subprocess.run(['pactl', 'set-sink-mute', '@DEFAULT_SINK@', '0'], capture_output=True)
 
 break_done = [False]
+open_btn_ref = [None]
 
 def on_timeout():
     if not DEV_MODE:
+        # Unmute BEFORE paplay so the gong is audible. paplay inherits
+        # the sink's mute state at playback time; playing into a muted
+        # sink is a silent no-op.
+        unmute()
         subprocess.Popen(['paplay', PING_SOUND])
     break_done[0] = True
     # Swap input for an Open button
@@ -44,6 +49,7 @@ def on_timeout():
     card.add(open_btn)
     cards_box.show_all()
     open_btn.grab_focus()
+    open_btn_ref[0] = open_btn
     return False
 
 def on_early_exit():
@@ -264,6 +270,26 @@ def check_lock_state():
     return True
 
 GLib.timeout_add_seconds(1, check_lock_state)
+
+# Cinnamon's WM strands keyboard focus on the desktop after the user
+# locks/unlocks or returns from idle — the blocker window stays
+# visible (keep_above + fullscreen) but key-press events go to the
+# focused window, not us. Re-present the window whenever it loses
+# focus so Enter on the Open button works without the user clicking
+# the overlay first. Headless --dev runs skip this (no WM steals
+# focus there).
+def ensure_focus():
+    if DEV_MODE:
+        return True
+    if not win.is_active():
+        win.present_with_time(Gdk.CURRENT_TIME)
+        if break_done[0] and open_btn_ref[0] is not None:
+            open_btn_ref[0].grab_focus()
+        else:
+            entry.grab_focus()
+    return True
+
+GLib.timeout_add(500, ensure_focus)
 try:
     Gtk.main()
 finally:
