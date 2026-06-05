@@ -11,6 +11,13 @@ delay_unlock_secs=3     # Seconds before the Delay button becomes clickable
 max_delays=2            # Max consecutive delays before forcing a break
 idle_pause_secs=300     # Pause timer when user idle longer than this (seconds)
 
+# Anti-procrastination throttle. If you max out the skip button
+# (max_delays uses) for `penalty_after_sessions` consecutive sessions,
+# the Delay button is disabled entirely for the next
+# `penalty_after_sessions` sessions before being restored. Set to 0
+# to disable the throttle.
+penalty_after_sessions=2
+
 # Mic sources to exclude from meeting detection.
 # Each pattern is matched as a case-insensitive substring against the
 # source-output's application.name, application.process.binary, and node.name

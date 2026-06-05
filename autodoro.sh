@@ -9,6 +9,7 @@ CHECK_INTERVAL=5
 DELAY_UNLOCK_SECS=3
 MAX_DELAYS=2
 IDLE_PAUSE_SECS=300
+PENALTY_AFTER_SESSIONS=2
 MIC_EXCLUDE_PATTERNS=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,12 +33,131 @@ _load_config() {
             delay_unlock_secs)   DELAY_UNLOCK_SECS="$value" ;;
             max_delays)          MAX_DELAYS="$value" ;;
             idle_pause_secs)     IDLE_PAUSE_SECS="$value" ;;
+            penalty_after_sessions) PENALTY_AFTER_SESSIONS="$value" ;;
             mic_exclude)         MIC_EXCLUDE_PATTERNS+=("$value") ;;
         esac
     done < "$file"
 }
 _load_config "$SCRIPT_DIR/config.defaults"
 _load_config "${XDG_CONFIG_HOME:-$HOME/.config}/autodoro/config"
+
+# --- ACROSS-RESTART STATE ---
+# Persisted so the script can be restarted (e.g. by the pre-push
+# deploy hook) without losing the anti-procrastination throttle's
+# session-level counters. Reset by deleting this file.
+STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/autodoro/state"
+STATE_SCHEMA=1                # bump when the on-disk format changes
+CONSEC_MAX_SKIP_SESSIONS=0    # consecutive sessions that hit MAX_DELAYS
+PENALTY_REMAINING=0           # sessions left with skip disabled
+
+# Coerce a state-file value to a non-negative integer. Empty / garbage
+# / negative input → 0. Defends against torn writes and unknown future
+# field types creeping into existing fields.
+_as_uint() {
+    case "$1" in
+        ''|*[!0-9]*) echo 0 ;;
+        *) echo "$1" ;;
+    esac
+}
+
+_load_state() {
+    mkdir -p "$(dirname "$STATE_FILE")"
+    [[ -f "$STATE_FILE" ]] || return
+    local schema=""
+    while IFS='=' read -r key value; do
+        value="${value%$'\r'}"   # strip a stray CR if the file ever picked one up
+        case "$key" in
+            schema)                   schema="$value" ;;
+            consec_max_skip_sessions) CONSEC_MAX_SKIP_SESSIONS="$(_as_uint "$value")" ;;
+            penalty_remaining)        PENALTY_REMAINING="$(_as_uint "$value")" ;;
+        esac
+    done < "$STATE_FILE"
+    # Unknown future schema → wipe to current defaults rather than
+    # trust fields we can't interpret. Same path as a missing file.
+    if [ -n "$schema" ] && [ "$schema" != "$STATE_SCHEMA" ]; then
+        echo "[$(date +%H:%M)] State schema $schema unknown (expected $STATE_SCHEMA); resetting throttle counters."
+        CONSEC_MAX_SKIP_SESSIONS=0
+        PENALTY_REMAINING=0
+    fi
+    # Drain stale state when the throttle is disabled by config —
+    # otherwise a `penalty_remaining=N` left in the file would force
+    # no-skip for one full work cycle before _on_session_end zeroed
+    # it. Clamp otherwise so lowering penalty_after_sessions between
+    # runs doesn't strand the user in a longer penalty than the new
+    # config allows.
+    if [ "$PENALTY_AFTER_SESSIONS" -le 0 ]; then
+        PENALTY_REMAINING=0
+        CONSEC_MAX_SKIP_SESSIONS=0
+    elif [ "$PENALTY_REMAINING" -gt "$PENALTY_AFTER_SESSIONS" ]; then
+        PENALTY_REMAINING=$PENALTY_AFTER_SESSIONS
+    fi
+}
+
+# Atomic write: tempfile-in-same-dir + rename. A truncate-then-write
+# (`cat > $STATE_FILE`) leaves a zero-byte file if the process is
+# killed mid-heredoc, which silently reset the throttle on next start
+# — exactly the regression the persistence is meant to prevent.
+#
+# A SIGKILL between mktemp and mv leaks one state.XXXXXX file. The
+# sweep below catches those on the next _save_state call (cheap
+# because the state dir holds one tiny file in steady state).
+_save_state() {
+    local dir tmp
+    dir="$(dirname "$STATE_FILE")"
+    mkdir -p "$dir"
+    # Best-effort sweep of orphaned tempfiles from prior crashes.
+    find "$dir" -maxdepth 1 -name 'state.??????' -type f -mmin +5 -delete 2>/dev/null || true
+    tmp="$(mktemp "$dir/state.XXXXXX")"
+    cat > "$tmp" <<EOF
+schema=$STATE_SCHEMA
+consec_max_skip_sessions=$CONSEC_MAX_SKIP_SESSIONS
+penalty_remaining=$PENALTY_REMAINING
+EOF
+    mv -f "$tmp" "$STATE_FILE"
+}
+_load_state
+
+# Called every time a real break ends (the blocker ran to completion,
+# either via the popup-result LOCK path or the timer-expired failsafe).
+# Updates the throttle counters using the just-finished session's
+# DELAY_COUNT, then resets DELAY_COUNT.
+#
+# Lock-then-unlock and idle-reset deliberately skip this — the user
+# didn't take an enforced break, so the throttle counters shouldn't
+# move in either direction.
+_on_session_end() {
+    # Throttle disabled by config. Clear any leftover penalty state
+    # so the user is not stranded inside an old penalty window after
+    # flipping the knob off.
+    if [ "$PENALTY_AFTER_SESSIONS" -le 0 ]; then
+        if [ "$PENALTY_REMAINING" -ne 0 ] || [ "$CONSEC_MAX_SKIP_SESSIONS" -ne 0 ]; then
+            PENALTY_REMAINING=0
+            CONSEC_MAX_SKIP_SESSIONS=0
+            _save_state
+        fi
+        DELAY_COUNT=0
+        return
+    fi
+    # During a penalty session DELAY_COUNT is forced to 0 (the popup
+    # disables the Delay button), so this branch is also the path
+    # that drains an in-progress penalty.
+    if [ "$PENALTY_REMAINING" -gt 0 ]; then
+        PENALTY_REMAINING=$((PENALTY_REMAINING - 1))
+        echo "[$(date +%H:%M)] Penalty: $PENALTY_REMAINING sessions of disabled skip remaining."
+    elif [ "$DELAY_COUNT" -ge "$MAX_DELAYS" ]; then
+        CONSEC_MAX_SKIP_SESSIONS=$((CONSEC_MAX_SKIP_SESSIONS + 1))
+        echo "[$(date +%H:%M)] Skip-maxed session streak: $CONSEC_MAX_SKIP_SESSIONS/$PENALTY_AFTER_SESSIONS."
+        if [ "$CONSEC_MAX_SKIP_SESSIONS" -ge "$PENALTY_AFTER_SESSIONS" ]; then
+            PENALTY_REMAINING=$PENALTY_AFTER_SESSIONS
+            CONSEC_MAX_SKIP_SESSIONS=0
+            echo "[$(date +%H:%M)] Penalty triggered: skip disabled for $PENALTY_REMAINING sessions."
+        fi
+    else
+        CONSEC_MAX_SKIP_SESSIONS=0
+    fi
+    DELAY_COUNT=0
+    _save_state
+}
 
 WAS_IN_MEETING=false
 WAS_LOCKED=false
@@ -121,9 +241,14 @@ for block in text.split('\n\n'):
 
     # 3. WARNING POPUP LOGIC
     # Only trigger if timer is low AND no popup is already active.
-    # After MAX_DELAYS consecutive delays, show popup with Delay button permanently disabled.
+    # Delay button disabled when either:
+    #   (a) per-session limit reached (DELAY_COUNT >= MAX_DELAYS), or
+    #   (b) currently inside a penalty window (PENALTY_REMAINING > 0).
     if [ $TIMER -le $WARNING_THRESHOLD ] && [ -z "$ZENITY_PID" ]; then
-        if [ $DELAY_COUNT -ge $MAX_DELAYS ]; then
+        if [ "$PENALTY_REMAINING" -gt 0 ]; then
+            echo "[$(date +%H:%M)] Penalty active ($PENALTY_REMAINING sessions left). Forced break popup (no delay)."
+            UNLOCK_SECS_ARG=-1
+        elif [ $DELAY_COUNT -ge $MAX_DELAYS ]; then
             echo "[$(date +%H:%M)] Delay limit reached ($DELAY_COUNT/$MAX_DELAYS). Forced break popup (no delay)."
             UNLOCK_SECS_ARG=-1
         else
@@ -162,8 +287,8 @@ for block in text.split('\n\n'):
                 # Timeout, Manual Lock, or Window Closed
                 echo "[$(date +%H:%M)] Blocking screen for break."
                 python3 "$SCRIPT_DIR/autodoro_blocker.py"
+                _on_session_end
                 TIMER=$WORK_TIME
-                DELAY_COUNT=0
             fi
             ZENITY_PID=""
         elif [ $TIMER -le 0 ]; then
@@ -173,8 +298,8 @@ for block in text.split('\n\n'):
             rm -f "$POPUP_RESULT_FILE"
             POPUP_RESULT_FILE=""
             python3 "$SCRIPT_DIR/autodoro_blocker.py"
+            _on_session_end
             TIMER=$WORK_TIME
-            DELAY_COUNT=0
             ZENITY_PID=""
         fi
     fi
