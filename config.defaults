@@ -18,7 +18,12 @@ idle_pause_secs=300     # Pause timer when user idle longer than this (seconds)
 # outages. Once the cap is reached the timer resumes and breaks are
 # enforced again even though the mic is still busy; the pause re-arms
 # as soon as the stream is released. Set to 0 for an unbounded pause.
-max_meeting_pause_secs=10800   # 3 hours
+#
+# This is a per-meeting ceiling, not a running total: releasing the mic
+# ends the meeting, and the next one opens a fresh window. Back-to-back
+# meetings are therefore never capped, by design — the cap targets one
+# stream nobody releases, not a genuinely long day of calls.
+max_meeting_pause_secs=21600   # 6 hours
 
 # Anti-procrastination throttle. If you max out the skip button
 # (max_delays uses) for `penalty_after_sessions` consecutive sessions,

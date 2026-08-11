@@ -36,7 +36,10 @@ export AUTODORO_TEST_NOW=0
 WORK_TIME=1500
 POST_MEETING_TIME=900
 CHECK_INTERVAL=5
-MAX_MEETING_PAUSE_SECS=10800     # 3h
+# An arbitrary cap value for the boundary tests — deliberately NOT the
+# shipped default, since the state machine must work for any cap.
+# Scenario H separately pins what the repo actually ships.
+MAX_MEETING_PAUSE_SECS=10800
 ZENITY_PID=""
 POPUP_RESULT_FILE=""
 TIMER=$WORK_TIME
@@ -158,5 +161,14 @@ step "$(mic)" 13799    >/dev/null           # 10799s into meeting two
 assert_eq "G.under_cap" "$PAUSED" true
 step "$(mic)" 13800    >/dev/null           # 10800s into meeting two
 assert_eq "G.capped"    "$MEETING_CAPPED" true
+
+# --- Scenario H: the shipped default is 6h in both declaration sites ---
+# The default lives twice — as a variable in autodoro.sh (used when no
+# config file supplies it) and in config.defaults. They must agree.
+echo "=== Scenario H: shipped default is 6h and consistent ==="
+SHIPPED_CONFIG=$(sed -n 's/^max_meeting_pause_secs=\([0-9]*\).*/\1/p' "$REPO_DIR/config.defaults")
+SHIPPED_SCRIPT=$(sed -n 's/^MAX_MEETING_PAUSE_SECS=\([0-9]*\).*/\1/p' "$REPO_DIR/autodoro.sh")
+assert_eq "H.config_defaults" "$SHIPPED_CONFIG" 21600
+assert_eq "H.script_default"  "$SHIPPED_SCRIPT" 21600
 
 echo "=== ALL PASS ==="
