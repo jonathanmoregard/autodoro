@@ -198,8 +198,20 @@ while true; do
     # Matching is by source-output NAME (case-insensitive substring against
     # application.name, application.process.binary, and node.name), so we count
     # actual mic events rather than whether some process happens to be running.
-    MIC_IN_USE=$(AUTODORO_EXCLUDES=$(printf '%s\n' "${MIC_EXCLUDE_PATTERNS[@]}") \
-        pactl list source-outputs 2>/dev/null | python3 -c "
+    # --- BEGIN mic-detection ---
+    # Extracted verbatim by scripts/test-mic-detection.sh — keep the
+    # markers, and keep this block self-contained (its only inputs are
+    # MIC_EXCLUDE_PATTERNS and `pactl`, its only output is MIC_IN_USE).
+    #
+    # The excludes must be published with a standalone export, NOT with
+    # a `AUTODORO_EXCLUDES=... pactl ... | python3` command prefix: that
+    # form binds the variable to `pactl` alone and never reaches
+    # `python3` on the far side of the pipe, which silently disabled
+    # every mic_exclude pattern (cinnamon's volume applet then read as a
+    # permanent meeting and pinned the timer for days).
+    AUTODORO_EXCLUDES=$(printf '%s\n' "${MIC_EXCLUDE_PATTERNS[@]}")
+    export AUTODORO_EXCLUDES
+    MIC_IN_USE=$(pactl list source-outputs 2>/dev/null | python3 -c "
 import sys, os
 excludes = [p.lower() for p in os.environ.get('AUTODORO_EXCLUDES', '').splitlines() if p]
 text = sys.stdin.read()
@@ -220,6 +232,7 @@ for block in text.split('\n\n'):
         continue
     print('yes|' + name); break
 " 2>/dev/null)
+    # --- END mic-detection ---
     if [[ "$MIC_IN_USE" == yes\|* ]]; then
         if [ "$WAS_IN_MEETING" = false ]; then
             echo "[$(date +%H:%M)] Meeting detected (${MIC_IN_USE#yes|}). Timer paused."
