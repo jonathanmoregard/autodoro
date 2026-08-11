@@ -10,6 +10,7 @@ DELAY_UNLOCK_SECS=3
 MAX_DELAYS=2
 IDLE_PAUSE_SECS=300
 PENALTY_AFTER_SESSIONS=2
+MAX_MEETING_PAUSE_SECS=10800
 MIC_EXCLUDE_PATTERNS=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,6 +35,7 @@ _load_config() {
             max_delays)          MAX_DELAYS="$value" ;;
             idle_pause_secs)     IDLE_PAUSE_SECS="$value" ;;
             penalty_after_sessions) PENALTY_AFTER_SESSIONS="$value" ;;
+            max_meeting_pause_secs) MAX_MEETING_PAUSE_SECS="$value" ;;
             mic_exclude)         MIC_EXCLUDE_PATTERNS+=("$value") ;;
         esac
     done < "$file"
@@ -160,6 +162,8 @@ _on_session_end() {
 }
 
 WAS_IN_MEETING=false
+MEETING_START_TS=0      # epoch seconds when the current meeting pause began
+MEETING_CAPPED=false    # true once this meeting outran MAX_MEETING_PAUSE_SECS
 WAS_LOCKED=false
 WAS_IDLE=false
 ZENITY_PID=""
@@ -191,6 +195,11 @@ while true; do
         [[ -n $BLOCKER_PID ]] && kill $BLOCKER_PID 2>/dev/null
         rm -f /tmp/autodoro_blocker.pid
         pactl set-sink-mute @DEFAULT_SINK@ 0
+        # Note: MEETING_CAPPED is deliberately NOT cleared here. The
+        # screen gets unlocked many times a day, so re-arming the pause
+        # on unlock would hand a stuck mic stream a fresh cap window
+        # every time and restore the unbounded-pause bug. Only the
+        # stream actually being released clears it.
     fi
 
     # 1. MEETING DETECTION
@@ -233,16 +242,43 @@ for block in text.split('\n\n'):
     print('yes|' + name); break
 " 2>/dev/null)
     # --- END mic-detection ---
+    # --- BEGIN meeting-state ---
+    # Extracted verbatim by scripts/test-meeting-cap.sh. Inputs:
+    # MIC_IN_USE, MAX_MEETING_PAUSE_SECS and the three meeting state
+    # vars; outputs: TIMER plus those state vars.
     if [[ "$MIC_IN_USE" == yes\|* ]]; then
-        if [ "$WAS_IN_MEETING" = false ]; then
-            echo "[$(date +%H:%M)] Meeting detected (${MIC_IN_USE#yes|}). Timer paused."
-            WAS_IN_MEETING=true
-            # Kill popup if it was open when meeting started
-            [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null; ZENITY_PID=""
-            [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE"; POPUP_RESULT_FILE=""
+        if [ "$MEETING_CAPPED" = false ]; then
+            if [ "$WAS_IN_MEETING" = false ]; then
+                echo "[$(date +%H:%M)] Meeting detected (${MIC_IN_USE#yes|}). Timer paused."
+                WAS_IN_MEETING=true
+                MEETING_START_TS=$(date +%s)
+                # Kill popup if it was open when meeting started
+                [[ -n $ZENITY_PID ]] && kill $ZENITY_PID 2>/dev/null; ZENITY_PID=""
+                [[ -n $POPUP_RESULT_FILE ]] && rm -f "$POPUP_RESULT_FILE"; POPUP_RESULT_FILE=""
+            fi
+            # A mic stream nobody ever releases would otherwise freeze
+            # the timer forever, with no symptom other than breaks
+            # quietly never arriving. Cap the pause: past the ceiling we
+            # stop believing this is a live meeting and resume enforcing
+            # breaks, mic or no mic.
+            if [ "$MAX_MEETING_PAUSE_SECS" -gt 0 ] &&
+               [ $(( $(date +%s) - MEETING_START_TS )) -ge "$MAX_MEETING_PAUSE_SECS" ]; then
+                echo "[$(date +%H:%M)] Meeting pause hit the ${MAX_MEETING_PAUSE_SECS}s cap; mic still active but timer resuming."
+                MEETING_CAPPED=true
+                # Cleared so the post-meeting branch below does not fire
+                # a grace period on top of the fresh cycle started here.
+                WAS_IN_MEETING=false
+                TIMER=$WORK_TIME
+            else
+                sleep $CHECK_INTERVAL
+                continue # Skip the rest of the loop; timer is frozen
+            fi
         fi
-        sleep $CHECK_INTERVAL
-        continue # Skip the rest of the loop; timer is frozen
+        # Capped: fall through and run the timer as if no mic were held.
+    elif [ "$MEETING_CAPPED" = true ]; then
+        # Stream finally released — re-arm pausing for the next meeting.
+        echo "[$(date +%H:%M)] Mic released after a capped meeting. Pause re-armed."
+        MEETING_CAPPED=false
     fi
 
     # 2. TRANSITION: POST-MEETING
@@ -251,6 +287,7 @@ for block in text.split('\n\n'):
         TIMER=$POST_MEETING_TIME
         WAS_IN_MEETING=false
     fi
+    # --- END meeting-state ---
 
     # 3. WARNING POPUP LOGIC
     # Only trigger if timer is low AND no popup is already active.

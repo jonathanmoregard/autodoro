@@ -11,6 +11,15 @@ delay_unlock_secs=3     # Seconds before the Delay button becomes clickable
 max_delays=2            # Max consecutive delays before forcing a break
 idle_pause_secs=300     # Pause timer when user idle longer than this (seconds)
 
+# Ceiling on how long a detected meeting may keep the timer paused.
+# A mic stream that is never released (a crashed app, a desktop applet
+# that taps the mic, a call left open overnight) otherwise pauses
+# autodoro indefinitely and silently — it has already cost multi-day
+# outages. Once the cap is reached the timer resumes and breaks are
+# enforced again even though the mic is still busy; the pause re-arms
+# as soon as the stream is released. Set to 0 for an unbounded pause.
+max_meeting_pause_secs=10800   # 3 hours
+
 # Anti-procrastination throttle. If you max out the skip button
 # (max_delays uses) for `penalty_after_sessions` consecutive sessions,
 # the Delay button is disabled entirely for the next
