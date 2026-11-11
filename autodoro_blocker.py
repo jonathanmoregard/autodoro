@@ -4,10 +4,14 @@
 
 import gi
 gi.require_version('Gtk', '3.0')
-from gi.repository import Gtk, Gdk, GdkPixbuf, GLib
+gi.require_version('GdkX11', '3.0')
+from gi.repository import Gtk, Gdk, GdkPixbuf, GdkX11, GLib, Gio
 import sys
 import os
 import subprocess
+import time
+
+from autodoro_focus import PresentPolicy, lock_transition
 
 PASSPHRASE    = "I need to enter now"
 IMAGE_PATH    = "/home/jonathan/Repos/intender/src/public/assets/misty-1280.webp"
@@ -250,46 +254,82 @@ entry.connect("activate", on_activate)
 win.connect("key-press-event", on_key_press)
 GLib.timeout_add_seconds(duration_secs, on_timeout)
 
-# Exit blocker when the user unlocks the screen (i.e. transitions from
-# locked back to active). This lets a manual lock/unlock dismiss the break.
-lock_state = ['active']  # 'active' = unlocked
-def check_lock_state():
-    try:
-        out = subprocess.run(
-            ['cinnamon-screensaver-command', '-q'],
-            capture_output=True, text=True, timeout=2
-        ).stdout
-    except Exception:
-        return True
-    locked = 'is active' in out
-    if locked:
-        lock_state[0] = 'locked'
-    elif lock_state[0] == 'locked':
+# --- Lock state ---
+# Exit blocker when the user unlocks the screen (locked -> unlocked
+# edge), so a manual lock/unlock dismisses the break. Watched via the
+# screensaver's ActiveChanged signal rather than forking
+# `cinnamon-screensaver-command -q` every second. DO_NOT_AUTO_START
+# matters: the name is D-Bus-activatable, and a status query must never
+# be the thing that starts a locker.
+locked = [False]
+
+def on_screensaver_active(now_locked):
+    locked[0], exit_now = lock_transition(locked[0], now_locked)
+    if exit_now:
         on_early_exit()
+
+def on_ss_signal(_proxy, _sender, signal, params):
+    if signal == 'ActiveChanged':
+        on_screensaver_active(params.unpack()[0])
+
+def on_get_active(proxy, res):
+    try:
+        on_screensaver_active(proxy.call_finish(res).unpack()[0])
+    except GLib.Error:
+        pass  # not answering: assume unlocked; ActiveChanged still arrives
+
+try:
+    ss_proxy = Gio.DBusProxy.new_for_bus_sync(
+        Gio.BusType.SESSION,
+        Gio.DBusProxyFlags.DO_NOT_AUTO_START | Gio.DBusProxyFlags.DO_NOT_LOAD_PROPERTIES,
+        None,
+        'org.cinnamon.ScreenSaver', '/org/cinnamon/ScreenSaver', 'org.cinnamon.ScreenSaver',
+        None,
+    )
+    ss_proxy.connect('g-signal', on_ss_signal)
+    if ss_proxy.get_name_owner() is not None:
+        ss_proxy.call('GetActive', None, Gio.DBusCallFlags.NO_AUTO_START, 2000, None, on_get_active)
+except GLib.Error as e:
+    print(f'autodoro_blocker: screensaver watch unavailable: {e.message}', file=sys.stderr)
+
+# --- Focus ---
+# Cinnamon's WM can strand keyboard focus elsewhere — the blocker stays
+# visible (keep_above + fullscreen) but key presses go to the focused
+# window. Re-present on the focus-lost edge, debounced, with a real X
+# server timestamp, rate-capped, and never while locked (PresentPolicy
+# has the why). Replaces a 500ms present_with_time(0) loop that fought
+# the locker for focus at 2 Hz.
+policy = PresentPolicy(DEV_MODE)
+pending_present = [None]
+cap_logged = [False]
+
+def present_if_needed():
+    pending_present[0] = None
+    if not policy.decide(locked[0], win.is_active(), time.monotonic()):
+        if policy.capped and not cap_logged[0]:
+            print('autodoro_blocker: focus re-present cap reached; '
+                  'not fighting the WM further this minute', file=sys.stderr)
+            cap_logged[0] = True
         return False
-    return True
+    cap_logged[0] = False
+    win.present_with_time(GdkX11.x11_get_server_time(win.get_window()))
+    if break_done[0] and open_btn_ref[0] is not None:
+        open_btn_ref[0].grab_focus()
+    else:
+        entry.grab_focus()
+    return False
 
-GLib.timeout_add_seconds(1, check_lock_state)
+def schedule_present(delay_ms):
+    if pending_present[0] is None:
+        pending_present[0] = GLib.timeout_add(delay_ms, present_if_needed)
 
-# Cinnamon's WM strands keyboard focus on the desktop after the user
-# locks/unlocks or returns from idle — the blocker window stays
-# visible (keep_above + fullscreen) but key-press events go to the
-# focused window, not us. Re-present the window whenever it loses
-# focus so Enter on the Open button works without the user clicking
-# the overlay first. Headless --dev runs skip this (no WM steals
-# focus there).
-def ensure_focus():
-    if DEV_MODE:
-        return True
-    if not win.is_active():
-        win.present_with_time(Gdk.CURRENT_TIME)
-        if break_done[0] and open_btn_ref[0] is not None:
-            open_btn_ref[0].grab_focus()
-        else:
-            entry.grab_focus()
-    return True
+def on_is_active(w, _pspec):
+    if not w.is_active():
+        schedule_present(250)
 
-GLib.timeout_add(500, ensure_focus)
+win.connect('notify::is-active', on_is_active)
+# A window the WM never focused on map produces no focus-lost edge.
+schedule_present(500)
 try:
     Gtk.main()
 finally:
