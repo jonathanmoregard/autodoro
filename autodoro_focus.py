@@ -18,7 +18,8 @@ class PresentPolicy:
     """Should the blocker raise itself and take keyboard focus now?
 
     Asked once per focus-lost edge (notify::is-active -> False), after a
-    short debounce, never on a timer.
+    debounce, plus once shortly after the window maps (a window the WM
+    never focused produces no edge). Never on a repeating timer.
 
     `--dev`: never. There is no WM stealing focus in a headless run, and
     a window that grabs focus makes UI iteration unusable.

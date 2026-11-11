@@ -275,8 +275,10 @@ def on_ss_signal(_proxy, _sender, signal, params):
 def on_get_active(proxy, res):
     try:
         on_screensaver_active(proxy.call_finish(res).unpack()[0])
-    except GLib.Error:
-        pass  # not answering: assume unlocked; ActiveChanged still arrives
+    except GLib.Error as e:
+        # Assume unlocked; ActiveChanged still arrives. Logged because a
+        # break opened while locked would then miss its unlock dismissal.
+        print(f'autodoro_blocker: screensaver GetActive failed: {e.message}', file=sys.stderr)
 
 try:
     ss_proxy = Gio.DBusProxy.new_for_bus_sync(
@@ -323,9 +325,17 @@ def schedule_present(delay_ms):
     if pending_present[0] is None:
         pending_present[0] = GLib.timeout_add(delay_ms, present_if_needed)
 
+# The debounce must outlast a lock's own sequence: cinnamon-screensaver
+# grabs the keyboard first (which is what costs us focus), then builds
+# its stage, and only then emits ActiveChanged(True) from an idle
+# callback. A 250ms debounce reliably presented once into that gap,
+# over the arriving lock screen. 2s lets the signal land first; a
+# genuine focus steal just waits 2s before being undone.
+FOCUS_LOST_DEBOUNCE_MS = 2000
+
 def on_is_active(w, _pspec):
     if not w.is_active():
-        schedule_present(250)
+        schedule_present(FOCUS_LOST_DEBOUNCE_MS)
 
 win.connect('notify::is-active', on_is_active)
 # A window the WM never focused on map produces no focus-lost edge.
